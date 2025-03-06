@@ -9,6 +9,50 @@ import openai
 from openai import OpenAI
 import time
 from datetime import datetime
+import json
+import uuid
+import sys
+
+# Set up explicit path to the utils directory
+try:
+    # Get the directory of the current script
+    current_file = Path(__file__).resolve()
+    parent_dir = current_file.parent
+    utils_dir = parent_dir / "utils"
+    
+    # Add the utils directory to the Python path
+    if str(utils_dir) not in sys.path:
+        sys.path.append(str(utils_dir))
+        
+    # Also add the parent directory to handle package imports
+    if str(parent_dir) not in sys.path:
+        sys.path.append(str(parent_dir))
+        
+    # Now try to import the chat history manager
+    from llm_chat.utils.chat_history import ChatHistoryManager
+except ImportError as e:
+    print(f"Import error: {e}")
+    # Fallback to direct import
+    try:
+        from llm_chat.utils.chat_history import ChatHistoryManager
+    except ImportError:
+        # Define a fallback version
+        class ChatHistoryManager:
+            def __init__(self, *args, **kwargs):
+                self.available = False
+                print("Using fallback ChatHistoryManager - saving/loading unavailable")
+                
+            def save_conversation(self, *args, **kwargs):
+                return None
+                
+            def list_conversations(self, *args, **kwargs):
+                return []
+                
+            def load_conversation(self, *args, **kwargs):
+                return {"messages": []}
+                
+            def delete_conversation(self, *args, **kwargs):
+                return False
 
 # Load environment variables from .env file
 load_dotenv()
@@ -132,6 +176,49 @@ def apply_custom_css():
         padding-bottom: 0.5rem;
         border-bottom: 1px solid rgba(255,255,255,0.1);
     }
+    /* Conversation list styling */
+    .conversation-item {
+        padding: 0.5rem;
+        margin-bottom: 0.5rem;
+        border-radius: 0.5rem;
+        cursor: pointer;
+        transition: background-color 0.3s;
+    }
+    .conversation-item:hover {
+        background-color: rgba(0,0,0,0.05);
+    }
+    .conversation-item.active {
+        background-color: rgba(33, 150, 243, 0.1);
+        border-left: 3px solid #2196F3;
+    }
+    .conversation-item .title {
+        font-weight: bold;
+        margin-bottom: 0.25rem;
+    }
+    .conversation-item .meta {
+        font-size: 0.8rem;
+        color: #666;
+    }
+    /* Action buttons */
+    .action-button {
+        padding: 0.5rem;
+        border-radius: 0.5rem;
+        text-align: center;
+        cursor: pointer;
+        transition: background-color 0.3s;
+        margin-bottom: 0.5rem;
+    }
+    .action-button:hover {
+        background-color: rgba(0,0,0,0.05);
+    }
+    .action-button.primary {
+        background-color: #2196F3;
+        color: white;
+    }
+    .action-button.danger {
+        background-color: #f44336;
+        color: white;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -141,7 +228,7 @@ def message_container(message, timestamp=None):
     content = message["content"]
     
     if timestamp is None:
-        timestamp = datetime.now().strftime("%H:%M")
+        timestamp = message.get("timestamp", datetime.now().strftime("%H:%M"))
     
     if role == "user":
         avatar = "👤"
@@ -200,22 +287,6 @@ def create_sidebar() -> dict:
         </style>
         """, unsafe_allow_html=True)
     
-    st.sidebar.markdown("<div class='sidebar-header'>About</div>", unsafe_allow_html=True)
-    st.sidebar.markdown(f"**llm_chat** v{__version__}")
-    st.sidebar.markdown("Created with Streamlit & OpenAI")
-    
-    # Display API key status
-    if api_key:
-        st.sidebar.success("OpenAI API Key: Connected")
-    else:
-        st.sidebar.error("OpenAI API Key: Missing")
-        st.sidebar.markdown("""
-        Please add your OpenAI API key to a `.env` file in the project root:
-        ```
-        OPENAI_API_KEY=your_api_key_here
-        ```
-        """)
-    
     return settings
 
 
@@ -237,6 +308,185 @@ def get_chat_response(messages, settings):
         return f"Error: {str(e)}"
 
 
+def format_date(date_str):
+    """Format ISO date string to human-readable format."""
+    try:
+        date_obj = datetime.fromisoformat(date_str)
+        return date_obj.strftime("%b %d, %Y %H:%M")
+    except:
+        return date_str
+
+
+def init_session_state():
+    """Initialize session state variables."""
+    if "current_conversation_id" not in st.session_state:
+        st.session_state.current_conversation_id = None
+    
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+        # Add a welcome message
+        st.session_state.messages.append({
+            "role": "assistant", 
+            "content": "Hello! I'm an AI assistant powered by OpenAI. How can I help you today?",
+            "timestamp": datetime.now().strftime("%H:%M")
+        })
+    
+    if "history_manager" not in st.session_state:
+        # Initialize the chat history manager
+        st.session_state.history_manager = ChatHistoryManager()
+    
+    if "show_rename_ui" not in st.session_state:
+        st.session_state.show_rename_ui = False
+    
+    if "new_title" not in st.session_state:
+        st.session_state.new_title = ""
+
+
+def save_current_conversation():
+    """Save the current conversation to disk."""
+    if not st.session_state.messages:
+        return
+    
+    history_manager = st.session_state.history_manager
+    messages = st.session_state.messages
+    
+    # Save or update the conversation
+    conversation_id = history_manager.save_conversation(
+        messages=messages,
+        conversation_id=st.session_state.current_conversation_id
+    )
+    
+    # Update the current conversation ID
+    st.session_state.current_conversation_id = conversation_id
+
+
+def load_conversation(conversation_id):
+    """Load a conversation from disk."""
+    history_manager = st.session_state.history_manager
+    
+    try:
+        conversation = history_manager.load_conversation(conversation_id)
+        st.session_state.messages = conversation.get("messages", [])
+        st.session_state.current_conversation_id = conversation_id
+    except Exception as e:
+        st.error(f"Error loading conversation: {str(e)}")
+
+
+def conversation_sidebar():
+    """Create a sidebar for managing conversations."""
+    history_manager = st.session_state.history_manager
+    
+    st.sidebar.markdown("<div class='sidebar-header'>Conversations</div>", unsafe_allow_html=True)
+    
+    # New conversation button
+    if st.sidebar.button("New Conversation", use_container_width=True):
+        st.session_state.messages = [{
+            "role": "assistant", 
+            "content": "Hello! I'm an AI assistant powered by OpenAI. How can I help you today?",
+            "timestamp": datetime.now().strftime("%H:%M")
+        }]
+        st.session_state.current_conversation_id = None
+        st.rerun()
+    
+    # List of saved conversations
+    conversations = history_manager.list_conversations()
+    
+    # Show rename UI if active
+    if st.session_state.show_rename_ui and st.session_state.current_conversation_id:
+        with st.sidebar.expander("Rename Conversation", expanded=True):
+            st.text_input(
+                "New title", 
+                value=st.session_state.new_title,
+                key="rename_input",
+                on_change=lambda: setattr(st.session_state, "new_title", st.session_state.rename_input)
+            )
+            
+            col1, col2 = st.columns(2)
+            if col1.button("Save", use_container_width=True):
+                history_manager.rename_conversation(
+                    st.session_state.current_conversation_id,
+                    st.session_state.new_title
+                )
+                st.session_state.show_rename_ui = False
+                st.rerun()
+            
+            if col2.button("Cancel", use_container_width=True):
+                st.session_state.show_rename_ui = False
+                st.rerun()
+    
+    # Divider
+    st.sidebar.markdown("---")
+    
+    # Display the list of conversations
+    if not conversations:
+        st.sidebar.info("No saved conversations yet.")
+    else:
+        for conv in conversations:
+            # Determine if this is the active conversation
+            is_active = st.session_state.current_conversation_id == conv["id"]
+            
+            # Create a container for each conversation
+            with st.sidebar.container():
+                # Display conversation info
+                st.markdown(
+                    f"""
+                    <div class="conversation-item {'active' if is_active else ''}">
+                        <div class="title">{conv["title"]}</div>
+                        <div class="meta">
+                            {format_date(conv["updated"])} · {conv["message_count"]} messages
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+                
+                # Buttons for this conversation
+                col1, col2, col3 = st.columns([1, 1, 1])
+                
+                # Load button
+                if col1.button("Load", key=f"load_{conv['id']}", use_container_width=True) and not is_active:
+                    load_conversation(conv["id"])
+                    st.rerun()
+                
+                # Rename button
+                if col2.button("Rename", key=f"rename_{conv['id']}", use_container_width=True):
+                    st.session_state.show_rename_ui = True
+                    st.session_state.new_title = conv["title"]
+                    st.session_state.current_conversation_id = conv["id"]
+                    st.rerun()
+                
+                # Delete button
+                if col3.button("Delete", key=f"delete_{conv['id']}", use_container_width=True):
+                    if history_manager.delete_conversation(conv["id"]):
+                        # If deleting the active conversation, reset
+                        if is_active:
+                            st.session_state.messages = [{
+                                "role": "assistant", 
+                                "content": "Hello! I'm an AI assistant powered by OpenAI. How can I help you today?",
+                                "timestamp": datetime.now().strftime("%H:%M")
+                            }]
+                            st.session_state.current_conversation_id = None
+                        st.rerun()
+    
+    # Display about section below conversations
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("<div class='sidebar-header'>About</div>", unsafe_allow_html=True)
+    st.sidebar.markdown(f"**llm_chat** v{__version__}")
+    st.sidebar.markdown("Created with Streamlit & OpenAI")
+    
+    # Display API key status
+    if api_key:
+        st.sidebar.success("OpenAI API Key: Connected")
+    else:
+        st.sidebar.error("OpenAI API Key: Missing")
+        st.sidebar.markdown("""
+        Please add your OpenAI API key to a `.env` file in the project root:
+        ```
+        OPENAI_API_KEY=your_api_key_here
+        ```
+        """)
+
+
 def main() -> None:
     """Main Streamlit application."""
     logger.info(f"Starting Streamlit chat app v{__version__}")
@@ -246,6 +496,9 @@ def main() -> None:
         page_icon="💬",
         layout="wide",
     )
+    
+    # Initialize session state
+    init_session_state()
     
     # Apply custom CSS
     apply_custom_css()
@@ -258,18 +511,11 @@ def main() -> None:
     </div>
     """, unsafe_allow_html=True)
     
-    # Create sidebar and get settings
+    # Get model settings
     settings = create_sidebar()
     
-    # Initialize chat history in session state if it doesn't exist
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-        # Add a welcome message
-        st.session_state.messages.append({
-            "role": "assistant", 
-            "content": "Hello! I'm an AI assistant powered by OpenAI. How can I help you today?",
-            "timestamp": datetime.now().strftime("%H:%M")
-        })
+    # Show conversation sidebar
+    conversation_sidebar()
     
     # Display chat messages
     for message in st.session_state.messages:
@@ -295,15 +541,20 @@ def main() -> None:
             api_messages = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
             response = get_chat_response(api_messages, settings)
             
-            # Simulate typing for UX
+            # Create assistant message
             response_message = {
                 "role": "assistant", 
                 "content": response,
                 "timestamp": datetime.now().strftime("%H:%M")
             }
             
-        # Add assistant response to chat history
-        st.session_state.messages.append(response_message)
+            # Add to chat history
+            st.session_state.messages.append(response_message)
+            
+            # Save the conversation automatically
+            save_current_conversation()
+        
+        # Display assistant message
         message_container(response_message)
         
         # Rerun to update UI
@@ -312,13 +563,9 @@ def main() -> None:
     # Action buttons
     col1, col2 = st.columns([1, 5])
     with col1:
-        if st.button("Clear Chat", use_container_width=True):
-            st.session_state.messages = [{
-                "role": "assistant", 
-                "content": "Hello! I'm an AI assistant powered by OpenAI. How can I help you today?",
-                "timestamp": datetime.now().strftime("%H:%M")
-            }]
-            st.rerun()
+        if st.button("Save Chat", use_container_width=True):
+            save_current_conversation()
+            st.success("Conversation saved!")
     
     # Additional information
     with st.expander("About this application"):
@@ -328,8 +575,8 @@ def main() -> None:
         Features:
         - Chat with various OpenAI models
         - Adjust model parameters like temperature and max tokens
-        - Chat history is maintained during your session
-        - API key is loaded securely from a .env file
+        - Save and load conversations
+        - Create multiple conversation threads
         - Dark/Light theme options
         
         To use this application, make sure you have an OpenAI API key in your .env file.
