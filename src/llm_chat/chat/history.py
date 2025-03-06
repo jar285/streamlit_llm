@@ -27,6 +27,7 @@ class ChatHistoryManager:
         
         # Cache for conversation metadata
         self._conversations_cache = None
+        logger.info(f"Initialized ChatHistoryManager with storage at {self.storage_dir}")
     
     def _ensure_storage_dir(self) -> None:
         """Ensure the storage directory exists."""
