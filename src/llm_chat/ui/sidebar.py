@@ -138,11 +138,11 @@ def render_conversation_sidebar(
     on_rename_conversation: Optional[Callable[[str, str], None]] = None,
     on_delete_conversation: Optional[Callable[[str], None]] = None
 ) -> None:
-    """Render the conversation sidebar for managing chat history."""
+    """Render improved conversation sidebar for managing chat history."""
     st.sidebar.markdown("<div class='sidebar-header'>Conversations</div>", unsafe_allow_html=True)
     
-    # New conversation button
-    if st.sidebar.button("New Conversation", use_container_width=True):
+    # New conversation button 
+    if st.sidebar.button("➕ New Conversation", key="new_conversation_btn", use_container_width=True):
         if on_new_conversation:
             on_new_conversation()
     
@@ -150,7 +150,8 @@ def render_conversation_sidebar(
     if "show_rename_ui" in st.session_state and st.session_state.show_rename_ui:
         with st.sidebar.container():
             st.markdown("""
-            <div style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 15px; border-left: 3px solid #2196F3;">
+            <div style="background-color: white; padding: 15px; border-radius: 8px; 
+                        margin: 15px 0; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
                 <h4 style="margin-top: 0; margin-bottom: 10px; color: #333;">Rename Conversation</h4>
             </div>
             """, unsafe_allow_html=True)
@@ -186,7 +187,7 @@ def render_conversation_sidebar(
         st.sidebar.info("No saved conversations yet.")
         return
     
-    # Display conversations as simple list with buttons
+    # Display conversations with material design cards
     for conv in conversations:
         # Determine if this is the active conversation
         is_active = current_conversation_id == conv["id"]
@@ -196,19 +197,18 @@ def render_conversation_sidebar(
             # Display conversation info with styling
             st.markdown(
                 f"""
-                <div style="background-color: {"#e6f7ff" if is_active else "#f8f9fa"}; 
-                            border-left: 3px solid {"#2196F3" if is_active else "transparent"}; 
-                            padding: 10px; border-radius: 5px; margin-bottom: 8px;">
-                    <div style="font-weight: bold; margin-bottom: 4px;">{conv["title"]}</div>
-                    <div style="font-size: 0.8rem; color: #666;">
-                        {format_date(conv["updated"])} · {conv["message_count"]} messages
+                <div class="conversation-card {"active" if is_active else ""}">
+                    <div class="conversation-title">{conv["title"]}</div>
+                    <div class="conversation-meta">
+                        <span>{format_date(conv["updated"])}</span>
+                        <span>{conv["message_count"]} messages</span>
                     </div>
                 </div>
                 """, 
                 unsafe_allow_html=True
             )
             
-            # Button row for actions
+            # Standard buttons without visibility tricks
             col1, col2, col3 = st.columns(3)
             with col1:
                 if st.button("Load", key=f"load_{conv['id']}", use_container_width=True):
