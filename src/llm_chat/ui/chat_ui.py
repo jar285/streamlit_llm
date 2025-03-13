@@ -1,16 +1,18 @@
 """Chat interface components for Streamlit UI."""
 import streamlit as st
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from ..chat.message import Message, Conversation
+from ..chat.system_prompts import AssistantType
 
 
-def render_message(message: Message) -> None:
+def render_message(message: Message, assistant_type: Optional[AssistantType] = None) -> None:
     """Render a single chat message.
     
     Args:
         message: Message object to render
+        assistant_type: Current assistant type (optional)
     """
     role = message.role
     content = message.content
@@ -20,15 +22,28 @@ def render_message(message: Message) -> None:
         avatar = "👤"
         role_display = "You"
         message_class = "user"
+    elif role == "system":
+        avatar = "⚙️"
+        role_display = "System"
+        message_class = "system"
     else:
-        avatar = "🤖"
-        role_display = "AI Assistant"
+        avatar = assistant_type.icon if assistant_type else "🤖"
+        role_display = assistant_type.name if assistant_type else "AI Assistant"
         message_class = "assistant"
+    
+    # Add assistant type badge for assistant messages
+    assistant_badge = ""
+    if role == "assistant" and assistant_type:
+        assistant_badge = f"""
+        <span class="message-assistant-type">
+            {assistant_type.icon} {assistant_type.name}
+        </span>
+        """
     
     st.markdown(f"""
     <div class="chat-message {message_class}">
         <div class="message-header">
-            <span class="role">{role_display}</span>
+            <span class="role">{role_display} {assistant_badge}</span>
             <span class="timestamp">{timestamp}</span>
         </div>
         <div class="message-content">
@@ -38,14 +53,15 @@ def render_message(message: Message) -> None:
     """, unsafe_allow_html=True)
 
 
-def render_conversation(conversation: Conversation) -> None:
+def render_conversation(conversation: Conversation, assistant_type: Optional[AssistantType] = None) -> None:
     """Render a complete conversation.
     
     Args:
         conversation: Conversation object to render
+        assistant_type: Current assistant type (optional)
     """
     for message in conversation.messages:
-        render_message(message)
+        render_message(message, assistant_type)
 
 
 def render_header(title: str, version: str) -> None:
@@ -70,62 +86,6 @@ def render_chat_input() -> str:
         User input text or empty string
     """
     return st.chat_input("Type your message here...") or ""
-
-
-def render_conversation_list(conversations: List[Dict[str, Any]], 
-                            current_id: str = None,
-                            on_load=None,
-                            on_rename=None,
-                            on_delete=None) -> None:
-    """Render the list of saved conversations.
-    
-    Args:
-        conversations: List of conversation metadata
-        current_id: ID of the currently active conversation
-        on_load: Callback for loading a conversation
-        on_rename: Callback for renaming a conversation
-        on_delete: Callback for deleting a conversation
-    """
-    if not conversations:
-        st.sidebar.info("No saved conversations yet.")
-        return
-    
-    for conv in conversations:
-        # Determine if this is the active conversation
-        is_active = current_id == conv["id"]
-        
-        # Create a container for each conversation
-        with st.sidebar.container():
-            # Display conversation info
-            st.markdown(
-                f"""
-                <div class="conversation-item {'active' if is_active else ''}">
-                    <div class="title">{conv["title"]}</div>
-                    <div class="meta">
-                        {format_date(conv["updated"])} · {conv["message_count"]} messages
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-            
-            # Buttons for this conversation
-            col1, col2, col3 = st.columns([1, 1, 1])
-            
-            # Load button
-            if col1.button("Load", key=f"load_{conv['id']}", use_container_width=True) and not is_active:
-                if on_load:
-                    on_load(conv["id"])
-            
-            # Rename button
-            if col2.button("Rename", key=f"rename_{conv['id']}", use_container_width=True):
-                if on_rename:
-                    on_rename(conv["id"], conv["title"])
-            
-            # Delete button
-            if col3.button("Delete", key=f"delete_{conv['id']}", use_container_width=True):
-                if on_delete:
-                    on_delete(conv["id"])
 
 
 def format_date(date_str: str) -> str:

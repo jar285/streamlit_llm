@@ -40,13 +40,15 @@ class ChatHistoryManager:
     def save_conversation(self, 
                           messages: List[Dict[str, Any]], 
                           conversation_id: Optional[str] = None,
-                          title: Optional[str] = None) -> str:
+                          title: Optional[str] = None,
+                          system_prompt: Optional[str] = None) -> str:
         """Save a conversation to disk.
         
         Args:
             messages: List of message dictionaries
             conversation_id: ID of the conversation to update, or None to create new
             title: Title of the conversation (optional)
+            system_prompt: System prompt for the conversation (optional)
             
         Returns:
             str: The conversation ID
@@ -72,6 +74,7 @@ class ChatHistoryManager:
         conversation_data = {
             "id": conversation_id,
             "title": title,
+            "system_prompt": system_prompt,
             "created": datetime.now().isoformat(),
             "updated": datetime.now().isoformat(),
             "messages": messages
