@@ -9,6 +9,7 @@ from typing import Dict, Any, List, Optional
 from .chat.client import ChatClient
 from .chat.history import ChatHistoryManager
 from .chat.message import Message, Conversation
+from .chat.system_prompts import system_prompt_manager
 from .config.settings import get_app_config, get_default_settings
 from .ui.styles import apply_theme
 from .ui.chat_ui import render_message, render_header, render_chat_input
@@ -31,22 +32,32 @@ def setup_page_config():
 
 def init_session_state():
     """Initialize session state variables."""
+    # Initialize settings if not exists
+    if "settings" not in st.session_state:
+        st.session_state.settings = get_default_settings()
+    
+    # Initialize assistant type if not exists
+    if "assistant_type" not in st.session_state:
+        st.session_state.assistant_type = "general"
+    
     # Initialize conversation if not exists
     if "conversation" not in st.session_state:
         st.session_state.conversation = Conversation()
+        
+        # Get system prompt for the current assistant type
+        system_prompt = system_prompt_manager.get_system_prompt(st.session_state.assistant_type)
+        st.session_state.conversation.set_system_prompt(system_prompt)
+        
         # Add a welcome message
+        assistant_type = system_prompt_manager.get_assistant_type(st.session_state.assistant_type)
         welcome_msg = Message.assistant_message(
-            "Hello! I'm an AI assistant powered by OpenAI. How can I help you today?"
+            f"Hello! I'm your {assistant_type.name if assistant_type else 'AI Assistant'}. How can I help you today?"
         )
         st.session_state.conversation.add_message(welcome_msg)
     
     # Initialize history manager if not exists
     if "history_manager" not in st.session_state:
         st.session_state.history_manager = ChatHistoryManager()
-    
-    # Initialize settings if not exists
-    if "settings" not in st.session_state:
-        st.session_state.settings = get_default_settings()
     
     # UI state
     if "show_rename_ui" not in st.session_state:
@@ -63,12 +74,51 @@ def init_session_state():
 
 def create_new_conversation():
     """Create a new conversation."""
-    st.session_state.conversation = Conversation()
+    # Get the current assistant type
+    current_assistant_type = st.session_state.get("assistant_type", "general")
+    
+    # Get the system prompt for this assistant type
+    system_prompt = system_prompt_manager.get_system_prompt(current_assistant_type)
+    
+    # Create new conversation with the system prompt
+    st.session_state.conversation = Conversation(system_prompt=system_prompt)
+    
+    # Get the selected assistant type info
+    assistant_type = system_prompt_manager.get_assistant_type(current_assistant_type)
+    
+    # Add a welcome message
     welcome_msg = Message.assistant_message(
-        "Hello! I'm an AI assistant powered by OpenAI. How can I help you today?"
+        f"Hello! I'm your {assistant_type.name if assistant_type else 'AI Assistant'}. How can I help you today?"
     )
     st.session_state.conversation.add_message(welcome_msg)
     st.rerun()
+
+
+def update_assistant_type(new_type: str):
+    """Update the assistant type and system prompt for the current conversation.
+    
+    Args:
+        new_type: The new assistant type ID
+    """
+    # Update session state
+    st.session_state.assistant_type = new_type
+    
+    # Get the system prompt for this assistant type
+    system_prompt = system_prompt_manager.get_system_prompt(new_type)
+    
+    # Update the current conversation
+    if "conversation" in st.session_state:
+        st.session_state.conversation.set_system_prompt(system_prompt)
+    
+    # Get the selected assistant type info
+    assistant_type = system_prompt_manager.get_assistant_type(new_type)
+    
+    # Add a message about the switch
+    if assistant_type:
+        switch_msg = Message.assistant_message(
+            f"I'm now in {assistant_type.name} mode. How can I assist you?"
+        )
+        st.session_state.conversation.add_message(switch_msg)
 
 
 def load_conversation(conversation_id: str):
@@ -80,10 +130,21 @@ def load_conversation(conversation_id: str):
     try:
         history_manager = st.session_state.history_manager
         conversation_data = history_manager.load_conversation(conversation_id)
-        st.session_state.conversation = Conversation.from_dict(conversation_data)
+        loaded_conversation = Conversation.from_dict(conversation_data)
+        
+        # Update the assistant type based on the loaded conversation
+        if loaded_conversation.system_prompt:
+            # Try to find an assistant type that matches this system prompt
+            for assistant_type in system_prompt_manager.get_all_assistant_types():
+                if assistant_type.system_prompt == loaded_conversation.system_prompt:
+                    st.session_state.assistant_type = assistant_type.id
+                    break
+        
+        st.session_state.conversation = loaded_conversation
         st.rerun()
     except Exception as e:
         st.error(f"Error loading conversation: {str(e)}")
+        logger.error(f"Error loading conversation {conversation_id}: {str(e)}")
 
 
 def rename_conversation(conversation_id: str, new_title: str):
@@ -96,7 +157,10 @@ def rename_conversation(conversation_id: str, new_title: str):
     success = history_manager.rename_conversation(conversation_id, new_title)
     
     if success:
-        st.toast(f"Renamed conversation to '{new_title}'")
+        st.success(f"Renamed conversation to '{new_title}'")
+        # If this is the current conversation, update its title
+        if conversation_id == getattr(st.session_state.conversation, "id", None):
+            st.session_state.conversation.title = new_title
     else:
         st.error("Failed to rename conversation")
         
@@ -107,42 +171,61 @@ def rename_conversation(conversation_id: str, new_title: str):
     st.rerun()
 
 
-
 def delete_conversation(conversation_id: str):
     """Delete a conversation from history.
     
     Args:
         conversation_id: ID of the conversation to delete
     """
-    history_manager = st.session_state.history_manager
-    # Check if deleting current conversation
-    current_id = getattr(st.session_state.conversation, "id", None)
-    
-    if history_manager.delete_conversation(conversation_id):
-        # If deleting current conversation, create new one
-        if conversation_id == current_id:
-            create_new_conversation()
+    try:
+        history_manager = st.session_state.history_manager
+        # Check if deleting current conversation
+        current_id = getattr(st.session_state.conversation, "id", None)
+        
+        success = history_manager.delete_conversation(conversation_id)
+        
+        if success:
+            st.success("Conversation deleted")
+            # If deleting current conversation, create new one
+            if conversation_id == current_id:
+                create_new_conversation()
+            else:
+                st.rerun()
         else:
-            st.rerun()
+            st.error("Failed to delete conversation")
+    except Exception as e:
+        st.error(f"Error deleting conversation: {str(e)}")
+        logger.error(f"Error deleting conversation {conversation_id}: {str(e)}")
 
 
 def save_current_conversation():
     """Save the current conversation to history."""
-    history_manager = st.session_state.history_manager
-    conversation = st.session_state.conversation
-    
-    # Convert to dict for saving
-    conversation_dict = conversation.to_dict()
-    
-    # Save conversation
-    conversation_id = history_manager.save_conversation(
-        messages=conversation_dict["messages"],
-        conversation_id=conversation.id,
-        title=conversation.title
-    )
-    
-    # Update conversation ID
-    conversation.id = conversation_id
+    try:
+        history_manager = st.session_state.history_manager
+        conversation = st.session_state.conversation
+        
+        # Convert to dict for saving
+        conversation_dict = conversation.to_dict()
+        
+        # Save conversation with system prompt
+        conversation_id = history_manager.save_conversation(
+            messages=conversation_dict["messages"],
+            conversation_id=conversation.id,
+            title=conversation.title,
+            system_prompt=conversation.system_prompt
+        )
+        
+        # Update conversation ID
+        conversation.id = conversation_id
+        
+        st.success("Conversation saved successfully!")
+        
+        logger.info(f"Saved conversation {conversation_id} with system prompt")
+        return True
+    except Exception as e:
+        st.error(f"Error saving conversation: {str(e)}")
+        logger.error(f"Error saving conversation: {str(e)}")
+        return False
 
 
 def process_user_input(user_input: str):
@@ -170,25 +253,29 @@ def process_user_input(user_input: str):
     
     # Get AI response
     with st.spinner("Thinking..."):
-        # Format messages for API
-        api_messages = conversation.get_api_messages()
-        
-        response_text = api_client.get_completion(
-            messages=api_messages,
-            model=settings["model"],
-            temperature=settings["temperature"],
-            max_tokens=settings["max_tokens"]
-        )
-        
-        # Create assistant message
-        assistant_message = Message.assistant_message(response_text)
-        conversation.add_message(assistant_message)
-        
-        # Save the conversation automatically
-        save_current_conversation()
-    
-    # Display assistant message
-    render_message(assistant_message)
+        try:
+            # Format messages for API
+            api_messages = conversation.get_api_messages()
+            
+            response_text = api_client.get_completion(
+                messages=api_messages,
+                model=settings["model"],
+                temperature=settings["temperature"],
+                max_tokens=settings["max_tokens"]
+            )
+            
+            # Create assistant message
+            assistant_message = Message.assistant_message(response_text)
+            conversation.add_message(assistant_message)
+            
+            # Save the conversation automatically
+            save_current_conversation()
+            
+            # Display assistant message
+            render_message(assistant_message)
+        except Exception as e:
+            st.error(f"Error generating response: {str(e)}")
+            logger.error(f"Error in process_user_input: {str(e)}")
     
     # Rerun to update UI
     st.rerun()
@@ -198,25 +285,48 @@ def run_app():
     """Run the Streamlit application."""
     logger.info("Starting application")
     
-    # Initialize session state before anything else
-    init_session_state()
-    
     # Set up page config
     setup_page_config()
+    
+    # Initialize session state
+    init_session_state()
     
     # Get app configuration
     config = get_app_config()
     
-    # Apply theme from session state (not settings yet, as they haven't been updated)
-    current_theme = st.session_state.get("theme", "light")
-    apply_theme(current_theme)
+    # Apply base styles
+    apply_theme()
     
     # Render the app header
     render_header(config["app_name"], config["version"])
     
-    # Render sidebar components (which may update the theme)
+    # Get current assistant type info
+    current_assistant_type = st.session_state.assistant_type
+    assistant_type = system_prompt_manager.get_assistant_type(current_assistant_type)
+    
+    # Show current assistant type
+    if assistant_type:
+        st.markdown(f"""
+        <div style="display: flex; align-items: center; margin-bottom: 20px; 
+                    padding: 10px; background-color: #f8f9fa; 
+                    border-radius: 8px; border-left: 4px solid #2196F3;">
+            <div style="font-size: 2rem; margin-right: 15px;">{assistant_type.icon}</div>
+            <div>
+                <div style="font-weight: bold; font-size: 1.2rem;">{assistant_type.name}</div>
+                <div style="font-size: 0.9rem; color: #666;">{assistant_type.description}</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Render sidebar components and get updated settings
     settings = render_settings_sidebar(config["version"])
-    st.session_state.settings = settings  # Update settings
+    
+    # Check if assistant type has changed
+    if settings["assistant_type"] != st.session_state.assistant_type:
+        update_assistant_type(settings["assistant_type"])
+    
+    # Update settings in session state
+    st.session_state.settings = settings
     
     # Show conversation management sidebar
     render_conversation_sidebar(
@@ -233,7 +343,7 @@ def run_app():
     
     # Display current conversation
     for message in st.session_state.conversation.messages:
-        render_message(message)
+        render_message(message, assistant_type)
     
     # Chat input
     user_input = render_chat_input()
@@ -244,8 +354,8 @@ def run_app():
     col1, col2 = st.columns([1, 5])
     with col1:
         if st.button("Save Chat", use_container_width=True):
-            save_current_conversation()
-            st.success("Conversation saved!")
+            if save_current_conversation():
+                st.success("Conversation saved!")
     
     # Additional information
     with st.expander("About this application"):
@@ -254,10 +364,10 @@ def run_app():
         
         Features:
         - Chat with various OpenAI models
+        - Choose different assistant types with specialized expertise
         - Adjust model parameters like temperature and max tokens
         - Save and load conversations
         - Create multiple conversation threads
-        - Dark/Light theme options
         
         To use this application, make sure you have an OpenAI API key in your .env file.
         """)

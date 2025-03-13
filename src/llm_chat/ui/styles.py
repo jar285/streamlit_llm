@@ -22,6 +22,10 @@ def apply_base_styles():
         background-color: #f0f2f6;
         border-left: 5px solid #4CAF50;
     }
+    .chat-message.system {
+        background-color: #f3e5f5;
+        border-left: 5px solid #9C27B0;
+    }
     .chat-message .message-content {
         margin-top: 0;
     }
@@ -84,7 +88,7 @@ def apply_base_styles():
         font-weight: bold;
         margin-bottom: 1rem;
         padding-bottom: 0.5rem;
-        border-bottom: 1px solid rgba(255,255,255,0.1);
+        border-bottom: 1px solid rgba(0,0,0,0.1);
     }
     /* Conversation list styling */
     .conversation-item {
@@ -129,38 +133,15 @@ def apply_base_styles():
         background-color: #f44336;
         color: white;
     }
-    </style>
-    """, unsafe_allow_html=True)
-
-
-def apply_dark_theme():
-    """Apply dark theme CSS overrides."""
-    st.markdown("""
-    <style>
-    .chat-message.user {
-        background-color: #2d3748;
-        border-left: 5px solid #4299e1;
-        color: #e2e8f0;
-    }
-    .chat-message.assistant {
-        background-color: #1a202c;
-        border-left: 5px solid #48bb78;
-        color: #e2e8f0;
-    }
-    .chat-message .message-header {
-        color: #a0aec0;
-    }
-    .conversation-item:hover {
-        background-color: rgba(255,255,255,0.05);
-    }
-    .conversation-item.active {
-        background-color: rgba(66, 153, 225, 0.2);
-    }
-    .conversation-item .meta {
-        color: #a0aec0;
-    }
-    .main-header {
-        border-bottom: 1px solid #2d3748;
+    
+    /* Message badge for assistant type */
+    .message-assistant-type {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 4px;
+        background-color: #e3f2fd;
+        margin-right: 5px;
+        font-size: 0.75rem;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -186,43 +167,14 @@ def apply_code_highlighting():
         background-color: transparent;
         padding: 0;
     }
-    .language-python, .language-javascript, .language-html, .language-css {
-        color: #333;
-    }
-    .dark-mode .language-python, .dark-mode .language-javascript, .dark-mode .language-html, .dark-mode .language-css {
-        color: #e2e8f0;
-    }
     </style>
     """, unsafe_allow_html=True)
 
 
-def apply_theme(theme: str = "light"):
-    """Apply a complete theme to the app.
-    
-    Args:
-        theme: Theme name ("light" or "dark")
-    """
-    # Always apply base styles
+def apply_theme():
+    """Apply the light theme to the app."""
+    # Apply base styles
     apply_base_styles()
     
     # Apply code highlighting
     apply_code_highlighting()
-    
-    # Apply theme-specific overrides
-    if theme.lower() == "dark":
-        apply_dark_theme()
-        # Add a class to the body for JavaScript-based styling
-        st.markdown("""
-        <script>
-            document.body.classList.add('dark-mode');
-            document.body.classList.remove('light-mode');
-        </script>
-        """, unsafe_allow_html=True)
-    else:
-        # Add light mode class and remove dark mode
-        st.markdown("""
-        <script>
-            document.body.classList.add('light-mode');
-            document.body.classList.remove('dark-mode');
-        </script>
-        """, unsafe_allow_html=True)

@@ -68,17 +68,20 @@ class Conversation:
     def __init__(self, 
                  messages: Optional[List[Message]] = None,
                  id: Optional[str] = None,
-                 title: Optional[str] = None):
+                 title: Optional[str] = None,
+                 system_prompt: Optional[str] = None):
         """Initialize a conversation.
         
         Args:
             messages: List of messages in the conversation
             id: Unique identifier for the conversation
             title: Title of the conversation
+            system_prompt: System prompt for the conversation
         """
         self.messages = messages or []
         self.id = id
         self.title = title
+        self.system_prompt = system_prompt
         self.created_at = datetime.now().isoformat()
         self.updated_at = self.created_at
     
@@ -87,11 +90,20 @@ class Conversation:
         self.messages.append(message)
         self.updated_at = datetime.now().isoformat()
     
+    def set_system_prompt(self, system_prompt: str) -> None:
+        """Set the system prompt for this conversation.
+        
+        Args:
+            system_prompt: The system prompt text
+        """
+        self.system_prompt = system_prompt
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert conversation to dictionary representation."""
         return {
             "id": self.id,
             "title": self.title,
+            "system_prompt": self.system_prompt,
             "created": self.created_at,
             "updated": self.updated_at,
             "messages": [m.to_dict() for m in self.messages]
@@ -102,13 +114,14 @@ class Conversation:
         """Create a conversation from dictionary representation."""
         id = data.get("id")
         title = data.get("title")
+        system_prompt = data.get("system_prompt")
         
         # Create message objects
         message_dicts = data.get("messages", [])
         messages = [Message.from_dict(m) for m in message_dicts]
         
         # Create conversation
-        conversation = cls(messages, id, title)
+        conversation = cls(messages, id, title, system_prompt)
         
         # Set timestamps if available
         conversation.created_at = data.get("created", conversation.created_at)
@@ -117,8 +130,19 @@ class Conversation:
         return conversation
     
     def get_api_messages(self) -> List[Dict[str, str]]:
-        """Get messages in format suitable for API calls (without metadata)."""
-        return [{"role": m.role, "content": m.content} for m in self.messages]
+        """Get messages in format suitable for API calls (without metadata).
+        
+        This includes the system prompt as a system message if present.
+        """
+        # Start with system prompt if available
+        api_messages = []
+        if self.system_prompt:
+            api_messages.append({"role": "system", "content": self.system_prompt})
+        
+        # Add conversation messages
+        api_messages.extend([{"role": m.role, "content": m.content} for m in self.messages])
+        
+        return api_messages
     
     def get_last_user_message(self) -> Optional[Message]:
         """Get the most recent user message."""
