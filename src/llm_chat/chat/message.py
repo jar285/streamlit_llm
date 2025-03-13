@@ -49,11 +49,13 @@ class Message:
     @classmethod
     def user_message(cls, content: str) -> 'Message':
         """Create a user message."""
+        # Ensure content is treated as plain text, not HTML
         return cls("user", content)
-    
+
     @classmethod
     def assistant_message(cls, content: str) -> 'Message':
         """Create an assistant message."""
+        # Ensure content is treated as plain text, not HTML
         return cls("assistant", content)
     
     @classmethod

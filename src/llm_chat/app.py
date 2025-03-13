@@ -14,6 +14,7 @@ from .config.settings import get_app_config, get_default_settings
 from .ui.styles import apply_theme
 from .ui.chat_ui import render_message, render_header, render_chat_input
 from .ui.sidebar import render_settings_sidebar, render_about_sidebar, render_conversation_sidebar
+from .utils.helpers import sanitize_html_content
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -50,10 +51,12 @@ def init_session_state():
         
         # Add a welcome message
         assistant_type = system_prompt_manager.get_assistant_type(st.session_state.assistant_type)
-        welcome_msg = Message.assistant_message(
-            f"Hello! I'm your {assistant_type.name if assistant_type else 'AI Assistant'}. How can I help you today?"
-        )
+        welcome_text = f"Hello! I'm your {assistant_type.name if assistant_type else 'AI Assistant'}. How can I help you today?"
+        welcome_msg = Message.assistant_message(welcome_text)
         st.session_state.conversation.add_message(welcome_msg)
+        
+        # Log the welcome message for debugging
+        print(f"Welcome message content: {welcome_msg.content}")
     
     # Initialize history manager if not exists
     if "history_manager" not in st.session_state:
@@ -70,6 +73,7 @@ def init_session_state():
     if "api_client" not in st.session_state:
         config = get_app_config()
         st.session_state.api_client = ChatClient(api_key=config["api_key"])
+
 
 
 def create_new_conversation():
@@ -112,12 +116,12 @@ def update_assistant_type(new_type: str):
     
     # Get the selected assistant type info
     assistant_type = system_prompt_manager.get_assistant_type(new_type)
-    
-    # Add a message about the switch
+
+    # Add a message about the switch with sanitization
     if assistant_type:
-        switch_msg = Message.assistant_message(
+        switch_msg = Message.assistant_message(sanitize_html_content(
             f"I'm now in {assistant_type.name} mode. How can I assist you?"
-        )
+        ))
         st.session_state.conversation.add_message(switch_msg)
 
 
@@ -229,19 +233,15 @@ def save_current_conversation():
 
 
 def process_user_input(user_input: str):
-    """Process user input and generate a response.
-    
-    Args:
-        user_input: User's message text
-    """
+    """Process user input and generate a response."""
     if not user_input.strip():
         return
     
     # Get current conversation
     conversation = st.session_state.conversation
     
-    # Add user message
-    user_message = Message.user_message(user_input)
+    # Add user message - apply sanitization here
+    user_message = Message.user_message(sanitize_html_content(user_input))
     conversation.add_message(user_message)
     
     # Display the message
@@ -264,8 +264,8 @@ def process_user_input(user_input: str):
                 max_tokens=settings["max_tokens"]
             )
             
-            # Create assistant message
-            assistant_message = Message.assistant_message(response_text)
+            # Create assistant message - apply sanitization here
+            assistant_message = Message.assistant_message(sanitize_html_content(response_text))
             conversation.add_message(assistant_message)
             
             # Save the conversation automatically
@@ -307,13 +307,13 @@ def run_app():
     # Show current assistant type
     if assistant_type:
         st.markdown(f"""
-        <div style="display: flex; align-items: center; margin-bottom: 20px; 
-                    padding: 10px; background-color: #f8f9fa; 
-                    border-radius: 8px; border-left: 4px solid #2196F3;">
-            <div style="font-size: 2rem; margin-right: 15px;">{assistant_type.icon}</div>
-            <div>
-                <div style="font-weight: bold; font-size: 1.2rem;">{assistant_type.name}</div>
-                <div style="font-size: 0.9rem; color: #666;">{assistant_type.description}</div>
+        <div style="display: flex; align-items: center; margin-bottom: 1.5rem; 
+                    padding: 1rem 1.5rem; background-color: white; 
+                    border-radius: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);">
+            <div style="font-size: 2.5rem; margin-right: 1rem;">{assistant_type.icon}</div>
+            <div style="flex-grow: 1;">
+                <div style="font-weight: 600; font-size: 1.25rem; margin-bottom: 0.25rem; color: #333;">{assistant_type.name}</div>
+                <div style="font-size: 0.9rem; color: #666; line-height: 1.4;">{assistant_type.description}</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -341,21 +341,46 @@ def run_app():
     # Render about section
     render_about_sidebar(config["version"], config["api_key"])
     
-    # Display current conversation
-    for message in st.session_state.conversation.messages:
-        render_message(message, assistant_type)
+        # Display current conversation
+    st.markdown("""
+    <style>
+        .block-container {
+            padding-top: 1rem;
+            padding-bottom: 0;
+            margin-top: 0;
+        }
+        
+        /* Fix for overlapping bar */
+        .main-content-container {
+            overflow: visible !important;
+        }
+        
+        /* Remove extra spacing between messages */
+        .stMarkdown {
+            margin-bottom: 0 !important;
+        }
+        
+        /* Ensure chat container is properly spaced */
+        .chat-container {
+            margin-bottom: 80px; /* Space for input box */
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # Create a container for all chat messages
+    chat_container = st.container()
+    with chat_container:
+        st.markdown('<div class="chat-container">', unsafe_allow_html=True)
+        # Display current conversation
+        for message in st.session_state.conversation.messages:
+            render_message(message, assistant_type)
+        st.markdown('</div>', unsafe_allow_html=True)
     
     # Chat input
     user_input = render_chat_input()
     if user_input:
         process_user_input(user_input)
     
-    # Action buttons
-    col1, col2 = st.columns([1, 5])
-    with col1:
-        if st.button("Save Chat", use_container_width=True):
-            if save_current_conversation():
-                st.success("Conversation saved!")
     
     # Additional information
     with st.expander("About this application"):

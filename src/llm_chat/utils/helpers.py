@@ -84,6 +84,18 @@ def truncate_text(text: str, max_length: int = 50) -> str:
         return text[:max_length-3] + "..."
     return text
 
+def sanitize_html_content(content: str) -> str:
+    """Sanitize content to ensure it's not treated as HTML.
+    
+    Args:
+        content: Text content to sanitize
+        
+    Returns:
+        Sanitized content
+    """
+    import html
+    return html.escape(content)
+
 
 def get_conversation_title_from_messages(messages: List[Dict[str, Any]]) -> str:
     """Generate a title from the first few messages.
